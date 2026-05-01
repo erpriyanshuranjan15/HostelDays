@@ -624,7 +624,7 @@
         <br>Set CLOUDINARY_CLOUD_NAME and CLOUDINARY_UPLOAD_PRESET in the script.
       </div>
       <div class="upload-modal-title" style="color:var(--cyan);" id="pum-member-name-title">ADD PHOTO</div>
-      <div class="upload-modal-sub">Upload a profile photo. It will be saved to Cloudinary &amp; persist on refresh.</div>
+      <div class="upload-modal-sub">Upload to Cloudinary, then paste the URL into the code so everyone sees it.</div>
       <div class="drop-zone" id="pumDropZone"
            onclick="document.getElementById('pumFileInput').click()"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
@@ -681,10 +681,28 @@
     <div id="pum-step3" style="display:none;">
       <div class="success-state">
         <div style="font-size:48px;color:var(--cyan);">✓</div>
-        <div class="success-title">PHOTO SET!</div>
-        <div class="success-sub" id="pum-success-sub">Profile photo saved to Cloudinary.</div>
-        <div style="font-family:'Barlow Condensed',sans-serif;font-size:10px;letter-spacing:2px;color:rgba(0,212,224,0.5);margin-bottom:20px;" id="pum-success-url"></div>
-        <button class="modal-btn-confirm" style="background:var(--cyan);color:#000;" onclick="closePhotoModal()">Done</button>
+        <div class="success-title">PHOTO UPLOADED!</div>
+        <div class="success-sub" id="pum-success-sub">Uploaded to Cloudinary successfully.</div>
+
+        <!-- Persistent URL box -->
+        <div style="background:#111;border:1px solid rgba(0,212,224,0.35);padding:14px 16px;margin:16px 0 8px;text-align:left;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:9px;letter-spacing:3px;color:var(--cyan);margin-bottom:8px;">☁ CLOUDINARY URL — COPY &amp; PASTE INTO CODE</div>
+          <div id="pum-success-url" style="font-family:monospace;font-size:11px;color:rgba(255,255,255,0.75);word-break:break-all;line-height:1.5;"></div>
+        </div>
+
+        <!-- Important instruction -->
+        <div style="background:rgba(255,200,0,0.07);border:1px solid rgba(255,200,0,0.3);padding:12px 14px;margin-bottom:16px;text-align:left;">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:2px;color:rgba(255,200,0,0.9);line-height:1.6;">
+            ⚠ TO MAKE THIS PHOTO VISIBLE FOR EVERYONE:<br>
+            Copy the URL above → open index.html → find the <strong>members</strong> array → paste it into <code style="color:var(--cyan);">photo: ""</code> for this member → redeploy on Vercel.
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+          <button class="modal-btn-confirm" style="background:var(--cyan);color:#000;letter-spacing:2px;" onclick="pumCopyURL()">📋 COPY URL</button>
+          <button class="modal-btn-cancel" onclick="closePhotoModal()">Close</button>
+        </div>
+        <div id="pum-copy-toast" style="font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:2px;color:var(--cyan);margin-top:10px;display:none;">✓ Copied to clipboard!</div>
       </div>
     </div>
   </div>
@@ -852,19 +870,15 @@ const members = [
   { id: 9, name: "Himanshu",    role: "The Silent One", photo: "" },
 ];
 
-// Restore saved photos from localStorage
-const savedPhotos = lsGet(LS_KEY_PHOTOS);
-members.forEach(m => {
-  if (savedPhotos[m.id]) m.photo = savedPhotos[m.id];
-});
-
 // Restore saved profile form data
 const profileData = lsGet(LS_KEY_PROFILES);
 
+// NOTE: Profile photos are stored as Cloudinary URLs directly in the members array above.
+// localStorage is NOT used for photos — that would only work on the uploader's own device.
+// After uploading, copy the Cloudinary URL shown in the success screen and paste it
+// into the matching member's  photo: ""  field in the members array, then redeploy.
 function savePhotos() {
-  const map = {};
-  members.forEach(m => { if (m.photo) map[m.id] = m.photo; });
-  lsSet(LS_KEY_PHOTOS, map);
+  // no-op: photos must be hardcoded as Cloudinary URLs in the members array
 }
 
 // ──────────────────────────────────────────
@@ -979,6 +993,25 @@ function openPhotoModal(name, id) {
 function closePhotoModal() {
   document.getElementById('photoUploadModal').classList.remove('open');
 }
+
+function pumCopyURL() {
+  const url = document.getElementById('pum-success-url').textContent.trim();
+  if (!url) return;
+  navigator.clipboard.writeText(url).then(() => {
+    const toast = document.getElementById('pum-copy-toast');
+    toast.style.display = 'block';
+    setTimeout(() => { toast.style.display = 'none'; }, 2500);
+  }).catch(() => {
+    // Fallback for older browsers
+    const ta = document.createElement('textarea');
+    ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    const toast = document.getElementById('pum-copy-toast');
+    toast.style.display = 'block';
+    setTimeout(() => { toast.style.display = 'none'; }, 2500);
+  });
+}
 document.getElementById('photoUploadModal').addEventListener('click', function(e) {
   if (e.target === this) closePhotoModal();
 });
@@ -1044,10 +1077,9 @@ async function pumConfirm() {
       document.getElementById('pum-step-uploading').style.display = 'none';
       document.getElementById('pum-step3').style.display = 'block';
       document.getElementById('pum-success-sub').textContent =
-        _pumMemberName + "'s photo " + (result.fallback ? 'saved locally.' : 'uploaded to Cloudinary!');
-      if (!result.fallback && result.url) {
-        document.getElementById('pum-success-url').textContent = '☁ ' + result.url.slice(0, 60) + '…';
-      }
+        _pumMemberName + "'s photo " + (result.fallback ? 'saved locally (not visible to others!).' : 'uploaded to Cloudinary!');
+      // Always show full URL so user can copy it into the source code
+      document.getElementById('pum-success-url').textContent = result.url || '';
     }, 400);
 
   } catch (err) {
