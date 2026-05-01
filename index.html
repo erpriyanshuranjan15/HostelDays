@@ -680,29 +680,14 @@
     <!-- Step 3: Success -->
     <div id="pum-step3" style="display:none;">
       <div class="success-state">
-        <div style="font-size:48px;color:var(--cyan);">✓</div>
-        <div class="success-title">PHOTO UPLOADED!</div>
-        <div class="success-sub" id="pum-success-sub">Uploaded to Cloudinary successfully.</div>
-
-        <!-- Persistent URL box -->
-        <div style="background:#111;border:1px solid rgba(0,212,224,0.35);padding:14px 16px;margin:16px 0 8px;text-align:left;">
-          <div style="font-family:'Barlow Condensed',sans-serif;font-size:9px;letter-spacing:3px;color:var(--cyan);margin-bottom:8px;">☁ CLOUDINARY URL — COPY &amp; PASTE INTO CODE</div>
-          <div id="pum-success-url" style="font-family:monospace;font-size:11px;color:rgba(255,255,255,0.75);word-break:break-all;line-height:1.5;"></div>
+        <div style="font-size:56px;">✅</div>
+        <div class="success-title">PHOTO LIVE!</div>
+        <div class="success-sub" id="pum-success-sub">Photo uploaded to Cloudinary and now visible for everyone!</div>
+        <div style="background:rgba(0,212,224,0.06);border:1px solid rgba(0,212,224,0.25);padding:14px 18px;margin:16px 0 20px;font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:2px;color:rgba(0,212,224,0.8);line-height:1.6;">
+          ☁ Anyone who opens the site will now see this photo automatically. No code changes needed.
         </div>
-
-        <!-- Important instruction -->
-        <div style="background:rgba(255,200,0,0.07);border:1px solid rgba(255,200,0,0.3);padding:12px 14px;margin-bottom:16px;text-align:left;">
-          <div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:2px;color:rgba(255,200,0,0.9);line-height:1.6;">
-            ⚠ TO MAKE THIS PHOTO VISIBLE FOR EVERYONE:<br>
-            Copy the URL above → open index.html → find the <strong>members</strong> array → paste it into <code style="color:var(--cyan);">photo: ""</code> for this member → redeploy on Vercel.
-          </div>
-        </div>
-
-        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
-          <button class="modal-btn-confirm" style="background:var(--cyan);color:#000;letter-spacing:2px;" onclick="pumCopyURL()">📋 COPY URL</button>
-          <button class="modal-btn-cancel" onclick="closePhotoModal()">Close</button>
-        </div>
-        <div id="pum-copy-toast" style="font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:2px;color:var(--cyan);margin-top:10px;display:none;">✓ Copied to clipboard!</div>
+        <div id="pum-success-url" style="display:none;"></div>
+        <button class="modal-btn-confirm" style="background:var(--cyan);color:#000;" onclick="closePhotoModal()">Done ✓</button>
       </div>
     </div>
   </div>
@@ -795,19 +780,18 @@ const CLOUDINARY_UPLOAD_PRESET = 'Hostel_day';  // e.g. 'hostelday_unsigned'
 // 4. Copy your Cloud Name from the top of your dashboard
 // 5. Paste both values above
 
-const CLD_CONFIGURED = CLOUDINARY_CLOUD_NAME !== 'YOUR_CLOUD_NAME';
-const CLD_URL        = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
-const LS_KEY_PHOTOS  = 'hostelday_profile_photos';   // localStorage key for profile photos
-const LS_KEY_ROOMS   = 'hostelday_room_photos';       // localStorage key for room memories
-const LS_KEY_PROFILES = 'hostelday_profiles';          // localStorage key for form data
+const CLD_CONFIGURED  = CLOUDINARY_CLOUD_NAME !== 'YOUR_CLOUD_NAME';
+const CLD_URL         = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
+const LS_KEY_PROFILES = 'hostelday_profiles';
 
-// ──────────────────────────────────────────
-// Core Cloudinary upload function
-// Returns: { url, public_id } or throws
-// ──────────────────────────────────────────
-async function uploadToCloudinary(file, onProgress) {
+// ─────────────────────────────────────────────────────────────────
+// uploadToCloudinary(file, tag, onProgress)
+//   tag  — stored as a Cloudinary tag so we can list it later
+//          e.g. "profile_member_3"  or  "room_232"
+// Returns: { url, public_id, fallback }
+// ─────────────────────────────────────────────────────────────────
+async function uploadToCloudinary(file, tag, onProgress) {
   if (!CLD_CONFIGURED) {
-    // Fallback: convert to base64 data URL locally
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload  = e => resolve({ url: e.target.result, public_id: null, fallback: true });
@@ -820,23 +804,21 @@ async function uploadToCloudinary(file, onProgress) {
   formData.append('file', file);
   formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
   formData.append('folder', 'hostelday');
+  if (tag) formData.append('tags', tag);  // ← tag saved on Cloudinary asset
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', CLD_URL, true);
-
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
+      if (e.lengthComputable && onProgress)
         onProgress(Math.round((e.loaded / e.total) * 100));
-      }
     };
-
     xhr.onload = () => {
       if (xhr.status === 200) {
         const data = JSON.parse(xhr.responseText);
         resolve({ url: data.secure_url, public_id: data.public_id, fallback: false });
       } else {
-        reject(new Error(`Cloudinary error: ${xhr.status}`));
+        reject(new Error(`Cloudinary error ${xhr.status}`));
       }
     };
     xhr.onerror = () => reject(new Error('Network error uploading to Cloudinary'));
@@ -844,8 +826,55 @@ async function uploadToCloudinary(file, onProgress) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────
+// fetchByTag(tag)
+//   Uses Cloudinary public image list endpoint (no auth needed).
+//   Returns array of { url, public_id, created_at }
+// ─────────────────────────────────────────────────────────────────
+async function fetchByTag(tag) {
+  if (!CLD_CONFIGURED) return [];
+  try {
+    const res = await fetch(
+      `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/image/list/${encodeURIComponent(tag)}.json`
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.resources || []).map(r => ({
+      url: `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/image/upload/${r.public_id}`,
+      public_id: r.public_id,
+      created_at: r.created_at || ''
+    }));
+  } catch(e) { return []; }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// loadAllPhotosFromCloudinary()
+//   Called on page load. Fetches every visitor's photos from
+//   Cloudinary tags so ALL users see the same images instantly.
+// ─────────────────────────────────────────────────────────────────
+async function loadAllPhotosFromCloudinary() {
+  if (!CLD_CONFIGURED) return;
+
+  // Profile photos — tag per member: "profile_member_1" … "profile_member_9"
+  await Promise.all(members.map(async (m) => {
+    const results = await fetchByTag(`profile_member_${m.id}`);
+    if (!results.length) return;
+    results.sort((a, b) => b.created_at.localeCompare(a.created_at)); // newest first
+    m.photo = results[0].url;
+    const card = document.getElementById('card-' + m.id);
+    if (card) card.innerHTML = buildCardHTML(m);
+  }));
+
+  // Room memory photos — tag: "room_232", "room_237", "room_238"
+  await Promise.all(['232','237','238'].map(async (room) => {
+    const results = await fetchByTag(`room_${room}`);
+    results.sort((a, b) => a.created_at.localeCompare(b.created_at)); // oldest first
+    results.forEach(r => addPhotoToGallery(room, r.url, false));
+  }));
+}
+
 // ──────────────────────────────────────────
-// localStorage helpers
+// localStorage helpers (kept for form data only)
 // ──────────────────────────────────────────
 function lsGet(key) {
   try { return JSON.parse(localStorage.getItem(key)) || {}; }
@@ -873,13 +902,6 @@ const members = [
 // Restore saved profile form data
 const profileData = lsGet(LS_KEY_PROFILES);
 
-// NOTE: Profile photos are stored as Cloudinary URLs directly in the members array above.
-// localStorage is NOT used for photos — that would only work on the uploader's own device.
-// After uploading, copy the Cloudinary URL shown in the success screen and paste it
-// into the matching member's  photo: ""  field in the members array, then redeploy.
-function savePhotos() {
-  // no-op: photos must be hardcoded as Cloudinary URLs in the members array
-}
 
 // ──────────────────────────────────────────
 // PAGE MANAGEMENT
@@ -994,24 +1016,6 @@ function closePhotoModal() {
   document.getElementById('photoUploadModal').classList.remove('open');
 }
 
-function pumCopyURL() {
-  const url = document.getElementById('pum-success-url').textContent.trim();
-  if (!url) return;
-  navigator.clipboard.writeText(url).then(() => {
-    const toast = document.getElementById('pum-copy-toast');
-    toast.style.display = 'block';
-    setTimeout(() => { toast.style.display = 'none'; }, 2500);
-  }).catch(() => {
-    // Fallback for older browsers
-    const ta = document.createElement('textarea');
-    ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta); ta.select();
-    document.execCommand('copy'); document.body.removeChild(ta);
-    const toast = document.getElementById('pum-copy-toast');
-    toast.style.display = 'block';
-    setTimeout(() => { toast.style.display = 'none'; }, 2500);
-  });
-}
 document.getElementById('photoUploadModal').addEventListener('click', function(e) {
   if (e.target === this) closePhotoModal();
 });
@@ -1056,7 +1060,8 @@ async function pumConfirm() {
   try {
     statusText.textContent = CLD_CONFIGURED ? 'Sending to Cloudinary…' : 'Processing locally…';
 
-    const result = await uploadToCloudinary(_pumFile, (pct) => {
+    const tag    = `profile_member_${_pumMemberId}`;
+    const result = await uploadToCloudinary(_pumFile, tag, (pct) => {
       bar.style.width = pct + '%';
       statusText.textContent = `Uploading… ${pct}%`;
     });
@@ -1064,21 +1069,18 @@ async function pumConfirm() {
     bar.style.width = '100%';
     statusText.textContent = 'Done!';
 
-    // Apply photo to card
+    // Apply photo to card immediately for the uploader
     const member = members.find(m => m.id === _pumMemberId);
     if (member) member.photo = result.url;
-    savePhotos();
-
     const card = document.getElementById('card-' + _pumMemberId);
     if (card) card.innerHTML = buildCardHTML(member);
 
-    // Show success
+    // Show success — no copy-paste needed, everyone will see it on next load
     setTimeout(() => {
       document.getElementById('pum-step-uploading').style.display = 'none';
       document.getElementById('pum-step3').style.display = 'block';
       document.getElementById('pum-success-sub').textContent =
-        _pumMemberName + "'s photo " + (result.fallback ? 'saved locally (not visible to others!).' : 'uploaded to Cloudinary!');
-      // Always show full URL so user can copy it into the source code
+        _pumMemberName + "'s photo is now live for everyone!";
       document.getElementById('pum-success-url').textContent = result.url || '';
     }, 400);
 
@@ -1091,11 +1093,9 @@ async function pumConfirm() {
 }
 
 // ──────────────────────────────────────────
-// ROOM MEMORY GALLERIES — restore from localStorage
-// ──────────────────────────────────────────
-const savedRoomPhotos = lsGet(LS_KEY_ROOMS); // { '232': [url,url,…], '237': […] }
-
-function addPhotoToGallery(room, url, saveToLS = true) {
+// ROOM MEMORY GALLERIES — loaded from Cloudinary (shared across all visitors)
+// ──────────────────────────────────────────────────────────────────────────────
+function addPhotoToGallery(room, url) {
   const mgrid = document.getElementById('masonry-' + room);
   const slot  = document.getElementById('slot-' + room);
 
@@ -1109,18 +1109,11 @@ function addPhotoToGallery(room, url, saveToLS = true) {
   `;
   div.onclick = () => openLightbox(url, 'Room ' + room);
   mgrid.insertBefore(div, slot);
-
-  if (saveToLS) {
-    if (!savedRoomPhotos[room]) savedRoomPhotos[room] = [];
-    savedRoomPhotos[room].push(url);
-    lsSet(LS_KEY_ROOMS, savedRoomPhotos);
-  }
+  // No localStorage — Cloudinary tags are the shared source of truth
 }
 
-// Restore saved room photos on page load
-['232','237','238'].forEach(room => {
-  (savedRoomPhotos[room] || []).forEach(url => addPhotoToGallery(room, url, false));
-});
+// Load all photos from Cloudinary on page load so every visitor sees the same images
+loadAllPhotosFromCloudinary();
 
 function showRoom(room, btn) {
   document.querySelectorAll('.room-gallery').forEach(g => g.classList.remove('active'));
@@ -1147,8 +1140,9 @@ function triggerRoomUpload(room) {
     slot.querySelector('.upload-text').textContent = 'UPLOADING…';
 
     try {
-      const result = await uploadToCloudinary(file);
-      addPhotoToGallery(room, result.url);
+      const tag    = `room_${room}`;
+      const result = await uploadToCloudinary(file, tag);
+      addPhotoToGallery(room, result.url, false);  // false = don't save to localStorage
     } catch (err) {
       alert('Upload failed: ' + err.message);
     }
@@ -1245,7 +1239,8 @@ async function confirmUpload() {
   statusText.textContent = CLD_CONFIGURED ? 'Sending to Cloudinary…' : 'Processing locally…';
 
   try {
-    const result = await uploadToCloudinary(_pendingFile, (pct) => {
+    const tag    = `room_${_selectedRoom}`;
+    const result = await uploadToCloudinary(_pendingFile, tag, (pct) => {
       statusText.textContent = `Uploading… ${pct}%`;
     });
 
